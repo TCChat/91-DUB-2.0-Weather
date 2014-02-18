@@ -34,7 +34,8 @@ static char city[30];  			// City
 static int temp = -25500;			// Temperature in Kelvins * 100
 static char temp_buffer[15]; 	// Temperature and units in text form
 static char icon[] = ")";		// Using icon font this means "N/A"
-static char desc[50];			// Desc of the weather
+static char desc[40];			// Desc of the weather
+static char time_buffer[50];
 
 static time_t update_time = 0;	// Time of the last update - unix epoch time
 static int seconds = -1;		// Seconds from the last update
@@ -42,6 +43,8 @@ static int seconds = -1;		// Seconds from the last update
 static AppTimer *weather_timer;
 static AppTimer *weather_update_timer;
 static AppTimer *weather_update_timeout_timer;
+
+static TextLayer *weather_update_layer;
 
 static Window *window;
 
@@ -443,10 +446,18 @@ static void weather_layer_update_callback(Layer *me, GContext *ctx){
 	bounds = GRect(35, 67, 86, 22);
 	graphics_draw_text(ctx, desc, digital_font, bounds, GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft,  NULL);
 	
-	char time_buffer[30];
+	//clock_copy_time_string(time_text_buffer, sizeof(time_text_buffer));
+	
 	struct tm *tick_time = localtime(&update_time);
-	strftime(time_buffer, sizeof(time_buffer), "%c", tick_time);
-	APP_LOG(APP_LOG_LEVEL_INFO, "Last update was: %s", time_buffer);
+	char *time_format;
+	if (clock_is_24h_style()) {
+      time_format = "Updated: %R";
+    } else {
+      time_format = "Updated: %I:%M %p";
+    }
+	strftime(time_buffer, sizeof(time_buffer), time_format, tick_time);
+	text_layer_set_text(weather_update_layer, time_buffer);
+	APP_LOG(APP_LOG_LEVEL_INFO, "%s", time_buffer);
 }
 
 void request_weather_update(){
@@ -489,6 +500,7 @@ void weather_hide(){
 	}
 	weather_is_showing = false;
 	layer_set_hidden(weather_layer, true);
+	layer_set_hidden(text_layer_get_layer(weather_update_layer), true);
 }
 
 static void timer_callback (void *data){
@@ -501,6 +513,7 @@ void weather_show(){
 	compose_temp();
 	layer_mark_dirty(weather_layer);
 	layer_set_hidden(weather_layer, false);
+	layer_set_hidden(text_layer_get_layer(weather_update_layer), false);
 	weather_is_showing = true;
 	weather_timer = app_timer_register(10000, timer_callback, NULL);
 }
@@ -594,9 +607,20 @@ void init(){
 	background_layer = bitmap_layer_create(layer_get_frame(window_layer));
 	bitmap_layer_set_bitmap(background_layer, background_image);
 	layer_add_child(window_layer, bitmap_layer_get_layer(background_layer));
-
+	
+	GRect frame = GRect(0, 0, 144, 19);
+	weather_update_layer = text_layer_create(frame);
+	text_layer_set_background_color(weather_update_layer, GColorBlack);
+	text_layer_set_text_color(weather_update_layer, GColorWhite);
+	text_layer_set_font(weather_update_layer, fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD));
+	text_layer_set_text_alignment(weather_update_layer, GTextAlignmentCenter);
+	text_layer_set_overflow_mode(weather_update_layer, GTextOverflowModeTrailingEllipsis);
+	text_layer_set_text(weather_update_layer, "Last update: Never");
+	layer_set_hidden(text_layer_get_layer(weather_update_layer), true);
+	layer_add_child(window_layer, text_layer_get_layer(weather_update_layer));
+	
 	meter_bar_image = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_METER_BAR);
-	GRect frame = (GRect){ .origin = { .x = 38, .y = 67}, .size = meter_bar_image->bounds.size};
+	frame = (GRect){ .origin = { .x = 38, .y = 67}, .size = meter_bar_image->bounds.size};
 	meter_bar_layer = bitmap_layer_create(frame);
 	bitmap_layer_set_bitmap(meter_bar_layer, meter_bar_image);
 	layer_add_child(window_layer, bitmap_layer_get_layer(meter_bar_layer));
@@ -696,7 +720,7 @@ void init(){
 	} else {
 		weather_update_timer = app_timer_register(1000*(60*60 - seconds), timer_update_callback, NULL);
 	}
-		
+	
 	tick_timer_service_subscribe(units_changed, handle_tick);
 	bluetooth_connection_service_subscribe(handle_bluetooth);
 	handle_bluetooth(bluetooth_connection_service_peek());
@@ -786,6 +810,9 @@ void deinit(){
   bitmap_layer_destroy(meter_bar_layer);
   gbitmap_destroy(meter_bar_image); 
 
+	layer_remove_from_parent(text_layer_get_layer(weather_update_layer));
+	text_layer_destroy(weather_update_layer);
+	
   layer_remove_from_parent(bitmap_layer_get_layer(background_layer));
   bitmap_layer_destroy(background_layer);
   gbitmap_destroy(background_image);
